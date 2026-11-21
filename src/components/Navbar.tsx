@@ -1,32 +1,143 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 
-const links = [
+const navLinks = [
   { label: "Home", href: "/" },
   { label: "Services", href: "/services" },
-  { label: "About", href: "/#about" },
-  { label: "Gallery", href: "/#gallery" },
-  { label: "Contact", href: "/#contact" },
+  { label: "My Dashboard", href: "/dashboard" },
+  { label: "Admin", href: "/admin" },
 ];
 
 export default function Navbar() {
-  const [open, setOpen] = useState(false);
+  const pathname = usePathname();
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const isActive = (href: string) =>
+    href === "/" ? pathname === "/" : pathname.startsWith(href);
+
   return (
-    <header className="site-header">
-      <div className="nav-inner container">
-        <Link className="brand" href="/" onClick={() => setOpen(false)}>SalonBook<span>.</span></Link>
-        <nav className={open ? "nav-links is-open" : "nav-links"} aria-label="Main navigation">
-          {links.map((link) => <Link key={link.href} href={link.href} onClick={() => setOpen(false)}>{link.label}</Link>)}
-          <Link className="mobile-book" href="/services" onClick={() => setOpen(false)}>Book Appointment</Link>
+    <header className="sticky top-0 z-50 border-b border-[#EADDD6] bg-[#FFFCF9]/95 backdrop-blur-md">
+      <div className="mx-auto flex h-20 max-w-7xl items-center justify-between gap-5 px-5 md:px-8">
+        <Link
+          href="/"
+          onClick={() => setMenuOpen(false)}
+          className="font-serif text-3xl tracking-wide text-[#984E59]"
+        >
+          SalonBook
+        </Link>
+
+        <nav className="hidden items-center gap-8 lg:flex">
+          {navLinks.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={`text-sm font-medium transition-colors ${
+                isActive(link.href)
+                  ? "text-[#984E59]"
+                  : "text-[#665B58] hover:text-[#984E59]"
+              }`}
+            >
+              {link.label}
+            </Link>
+          ))}
         </nav>
-        <div className="nav-actions">
-          <Link className="nav-signin" href="/login">Sign In</Link>
-          <Link className="button button-small" href="/services">Book Now <span aria-hidden="true">↗</span></Link>
-          <button className="menu-toggle" type="button" aria-label={open ? "Close menu" : "Open menu"} aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "✕" : "☰"}</button>
+
+        <div className="hidden items-center gap-3 lg:flex">
+          <Link
+            href="/login"
+            className="px-4 py-2 text-sm font-medium text-[#984E59]"
+          >
+            Sign In
+          </Link>
+
+          <Link
+            href="/register"
+            className="bg-[#984E59] px-5 py-3 text-xs font-semibold uppercase tracking-wider text-white"
+          >
+            Join Us
+          </Link>
         </div>
+
+        <button
+          type="button"
+          aria-label={menuOpen ? "Close menu" : "Open menu"}
+          aria-expanded={menuOpen}
+          aria-controls="mobile-navigation"
+          onClick={() => setMenuOpen(!menuOpen)}
+          className="flex h-11 w-11 items-center justify-center border border-[#EADDD6] text-[#984E59] lg:hidden"
+        >
+          {menuOpen ? (
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              aria-hidden="true"
+            >
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          ) : (
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              aria-hidden="true"
+            >
+              <path d="M4 7h16M4 12h16M4 17h16" />
+            </svg>
+          )}
+        </button>
       </div>
+
+      {menuOpen && (
+        <nav
+          id="mobile-navigation"
+          className="border-t border-[#EADDD6] bg-[#FFFCF9] px-5 py-5 lg:hidden"
+        >
+          <div className="mx-auto flex max-w-7xl flex-col gap-2">
+            {navLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                onClick={() => setMenuOpen(false)}
+                className={`px-4 py-3 text-sm ${
+                  isActive(link.href)
+                    ? "bg-[#F8F0EB] font-semibold text-[#984E59]"
+                    : "text-[#665B58]"
+                }`}
+              >
+                {link.label}
+              </Link>
+            ))}
+
+            <div className="mt-3 grid grid-cols-2 gap-3 border-t border-[#EADDD6] pt-5">
+              <Link
+                href="/login"
+                onClick={() => setMenuOpen(false)}
+                className="border border-[#984E59] px-4 py-3 text-center text-sm text-[#984E59]"
+              >
+                Sign In
+              </Link>
+
+              <Link
+                href="/register"
+                onClick={() => setMenuOpen(false)}
+                className="bg-[#984E59] px-4 py-3 text-center text-sm text-white"
+              >
+                Register
+              </Link>
+            </div>
+          </div>
+        </nav>
+      )}
     </header>
   );
 }
