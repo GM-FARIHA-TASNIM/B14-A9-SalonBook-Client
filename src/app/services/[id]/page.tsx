@@ -14,6 +14,7 @@ export function generateStaticParams() {
 
 export default async function ServiceDetailsPage({ params }: Props) {
   const { id } = await params;
+
   const service = services.find((item) => item.id === id);
 
   if (!service) {
