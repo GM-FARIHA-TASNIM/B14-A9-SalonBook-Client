@@ -1,36 +1,104 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SalonBook — Salon Appointment Booking Platform
+
+SalonBook is a modern, full-stack salon appointment booking platform designed to make beauty and wellness services easier to discover, book, and manage.
+
+Built with a clean, responsive interface, SalonBook provides a smooth booking experience for customers and an efficient management dashboard for administrators.
+
+## Features
+
+### Customer Features
+- Explore salon services by category.
+- View detailed service information, pricing, and duration.
+- Create an account and securely sign in.
+- Book appointments by selecting a preferred date and time.
+- View and manage personal appointments.
+- Cancel eligible unpaid appointments.
+- Complete payments through Stripe Checkout.
+- Manage personal profile information.
+
+### Admin Features
+- Access a role-based admin dashboard.
+- Add, update, and delete salon services.
+- View registered users.
+- Monitor customer appointments.
+- Confirm and manage appointment statuses.
+- Track booking and payment information.
+
+## Technologies Used
+
+**Frontend**
+- Next.js
+- React
+- TypeScript
+- Tailwind CSS
+
+**Backend**
+- Node.js
+- Express.js
+- MongoDB Atlas
+- Better Auth
+- Stripe Checkout
+
+## Authentication and Security
+
+SalonBook uses Better Auth for user authentication and role-based access control for customer and administrator features.
+
+Payment processing is handled through Stripe Checkout, with server-side webhook verification.
 
 ## Getting Started
 
-First, run the development server:
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/GM-FARIHA-TASNIM/b14-a9-salonbook-client.git
+cd b14-a9-salonbook-client
+```
+
+### 2. Install dependencies
+
+```bash
+npm install
+```
+
+### 3. Configure environment variables
+
+Create a `.env.local` file in the project root:
+
+```env
+NEXT_PUBLIC_API_URL=http://localhost:5000
+```
+
+### 4. Start the development server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://localhost:3000` in your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+**Note:** The frontend requires the SalonBook backend API to be running for authentication, booking, and payment features.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Deployment
 
-## Learn More
+- **Frontend:** Vercel
+- **Backend:** Render
+- **Database:** MongoDB Atlas
+- **Payments:** Stripe Sandbox
 
-To learn more about Next.js, take a look at the following resources:
+The deployed frontend must use the public backend URL in `NEXT_PUBLIC_API_URL`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Project Repositories
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+**Frontend:** https://github.com/GM-FARIHA-TASNIM/b14-a9-salonbook-client
 
-## Deploy on Vercel
+**Backend:** Add the backend repository URL here.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Author
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+**Fariha Tasnim**
+
+GitHub: https://github.com/GM-FARIHA-TASNIM
+
+---
+
+Developed as part of Programming Hero — Assignment 9.
