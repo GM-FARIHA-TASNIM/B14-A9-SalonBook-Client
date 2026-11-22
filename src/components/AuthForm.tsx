@@ -2,6 +2,8 @@
 
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { authClient } from "@/lib/auth-client";
 
 type AuthMode = "login" | "register";
 
@@ -10,6 +12,7 @@ type Props = {
 };
 
 export default function AuthForm({ mode }: Props) {
+  const router = useRouter();
   const isRegister = mode === "register";
 
   const [name, setName] = useState("");
@@ -18,8 +21,10 @@ export default function AuthForm({ mode }: Props) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setMessage("");
 
@@ -38,9 +43,59 @@ export default function AuthForm({ mode }: Props) {
       return;
     }
 
-    setMessage(
-      "Authentication preview only. Account creation and login will be enabled after Better Auth integration.",
-    );
+    setLoading(true);
+
+    try {
+      if (isRegister) {
+        const result = await authClient.signUp.email({
+          name: name.trim(),
+          email: email.trim(),
+          password,
+        });
+
+        if (result.error) {
+          setMessage(result.error.message || "Registration failed.");
+          return;
+        }
+      } else {
+        const result = await authClient.signIn.email({
+          email: email.trim(),
+          password,
+        });
+
+        if (result.error) {
+          setMessage(result.error.message || "Login failed.");
+          return;
+        }
+      }
+
+      router.push("/dashboard");
+      router.refresh();
+    } catch {
+      setMessage("Unable to connect to the server. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setMessage("");
+    setGoogleLoading(true);
+
+    try {
+      const result = await authClient.signIn.social({
+        provider: "google",
+        callbackURL: "/dashboard",
+      });
+
+      if (result.error) {
+        setMessage(result.error.message || "Google Sign-In failed.");
+        setGoogleLoading(false);
+      }
+    } catch {
+      setMessage("Unable to start Google Sign-In.");
+      setGoogleLoading(false);
+    }
   };
 
   return (
@@ -201,9 +256,14 @@ export default function AuthForm({ mode }: Props) {
 
               <button
                 type="submit"
-                className="w-full bg-[#984E59] px-5 py-4 text-xs font-semibold uppercase tracking-[0.15em] text-white transition-colors hover:bg-[#803F49]"
+                disabled={loading || googleLoading}
+                className="w-full bg-[#984E59] px-5 py-4 text-xs font-semibold uppercase tracking-[0.15em] text-white transition-colors hover:bg-[#803F49] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {isRegister ? "Create Account" : "Sign In"}
+                {loading
+                  ? "Please Wait..."
+                  : isRegister
+                    ? "Create Account"
+                    : "Sign In"}
               </button>
 
               {message && (
@@ -226,12 +286,9 @@ export default function AuthForm({ mode }: Props) {
 
             <button
               type="button"
-              onClick={() =>
-                setMessage(
-                  "Google Sign-In will be available after Better Auth integration.",
-                )
-              }
-              className="flex w-full items-center justify-center gap-3 border border-[#E7DAD3] bg-white px-5 py-3.5 text-sm font-medium text-[#342D2C]"
+              onClick={handleGoogleSignIn}
+              disabled={loading || googleLoading}
+              className="flex w-full items-center justify-center gap-3 border border-[#E7DAD3] bg-white px-5 py-3.5 text-sm font-medium text-[#342D2C] disabled:cursor-not-allowed disabled:opacity-60"
             >
               <svg aria-hidden="true" viewBox="0 0 48 48" className="h-5 w-5">
                 <path
@@ -251,7 +308,8 @@ export default function AuthForm({ mode }: Props) {
                   d="M24 48c6.48 0 11.93-2.13 15.9-5.8l-7.73-6c-2.14 1.44-4.89 2.3-8.17 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
                 />
               </svg>
-              Continue with Google
+
+              {googleLoading ? "Connecting..." : "Continue with Google"}
             </button>
 
             <p className="mt-8 text-center text-sm text-[#81736E]">
@@ -267,7 +325,7 @@ export default function AuthForm({ mode }: Props) {
             </p>
 
             <p className="mt-6 text-center text-xs text-[#9A8A84]">
-              Authentication is currently in preview mode.
+              Your beauty journey starts here.
             </p>
           </div>
         </section>
