@@ -8,12 +8,14 @@ import { authClient } from "@/lib/auth-client";
 export default function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
+
   const [menuOpen, setMenuOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
 
   const { data: session, isPending } = authClient.useSession();
 
-  const isLoggedIn = !!session?.user;
+  const isLoggedIn = Boolean(session?.user);
 
   const navLinks = [
     { label: "Home", href: "/" },
@@ -30,23 +32,26 @@ export default function Navbar() {
     href === "/" ? pathname === "/" : pathname.startsWith(href);
 
   async function handleLogout() {
+    if (loggingOut) return;
+
     setLoggingOut(true);
+    setLogoutError("");
 
     try {
       const result = await authClient.signOut();
 
       if (result.error) {
-        throw new Error(result.error.message || "Logout failed");
+        throw new Error(result.error.message || "Unable to sign out.");
       }
 
       setMenuOpen(false);
       router.replace("/");
       router.refresh();
     } catch (error) {
-      alert(
+      setLogoutError(
         error instanceof Error
           ? error.message
-          : "Unable to sign out. Please try again.",
+          : "Logout failed. Please try again.",
       );
     } finally {
       setLoggingOut(false);
@@ -64,6 +69,7 @@ export default function Navbar() {
           SalonBook
         </Link>
 
+        {/* Desktop Navigation */}
         <nav className="hidden items-center gap-8 lg:flex">
           {navLinks.map((link) => (
             <Link
@@ -80,48 +86,52 @@ export default function Navbar() {
           ))}
         </nav>
 
+        {/* Desktop Authentication Buttons */}
         <div className="hidden items-center gap-3 lg:flex">
-          {!isPending &&
-            (isLoggedIn ? (
-              <>
-                <span className="max-w-36 truncate text-sm text-[#665B58]">
-                  {session.user.name}
-                </span>
+          {isLoggedIn ? (
+            <>
+              <Link
+                href="/profile"
+                className="max-w-40 truncate px-3 py-2 text-sm font-medium text-[#984E59]"
+              >
+                {session?.user?.name || "My Profile"}
+              </Link>
 
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  disabled={loggingOut}
-                  className="bg-[#984E59] px-5 py-3 text-xs font-semibold uppercase tracking-wider text-white disabled:opacity-60"
-                >
-                  {loggingOut ? "Signing Out..." : "Logout"}
-                </button>
-              </>
-            ) : (
-              <>
-                <Link
-                  href="/login"
-                  className="px-4 py-2 text-sm font-medium text-[#984E59]"
-                >
-                  Sign In
-                </Link>
+              <button
+                type="button"
+                onClick={handleLogout}
+                disabled={loggingOut}
+                className="bg-[#984E59] px-5 py-3 text-xs font-semibold uppercase tracking-wider text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loggingOut ? "Signing Out..." : "Logout"}
+              </button>
+            </>
+          ) : (
+            <>
+              <Link
+                href="/login"
+                className="px-4 py-2 text-sm font-medium text-[#984E59]"
+              >
+                Sign In
+              </Link>
 
-                <Link
-                  href="/register"
-                  className="bg-[#984E59] px-5 py-3 text-xs font-semibold uppercase tracking-wider text-white"
-                >
-                  Join Us
-                </Link>
-              </>
-            ))}
+              <Link
+                href="/register"
+                className="bg-[#984E59] px-5 py-3 text-xs font-semibold uppercase tracking-wider text-white"
+              >
+                Join Us
+              </Link>
+            </>
+          )}
         </div>
 
+        {/* Mobile Menu Button */}
         <button
           type="button"
           aria-label={menuOpen ? "Close menu" : "Open menu"}
           aria-expanded={menuOpen}
           aria-controls="mobile-navigation"
-          onClick={() => setMenuOpen(!menuOpen)}
+          onClick={() => setMenuOpen((prev) => !prev)}
           className="flex h-11 w-11 items-center justify-center border border-[#EADDD6] text-[#984E59] lg:hidden"
         >
           {menuOpen ? (
@@ -152,6 +162,16 @@ export default function Navbar() {
         </button>
       </div>
 
+      {logoutError && (
+        <p
+          role="alert"
+          className="border-t border-red-200 bg-red-50 px-5 py-2 text-center text-sm text-red-700"
+        >
+          {logoutError}
+        </p>
+      )}
+
+      {/* Mobile Navigation */}
       {menuOpen && (
         <nav
           id="mobile-navigation"
@@ -173,44 +193,47 @@ export default function Navbar() {
               </Link>
             ))}
 
-            {!isPending && (
-              <div className="mt-3 border-t border-[#EADDD6] pt-5">
-                {isLoggedIn ? (
-                  <div className="space-y-3">
-                    <p className="px-4 text-sm text-[#665B58]">
-                      Signed in as {session.user.name}
+            <div className="mt-3 border-t border-[#EADDD6] pt-5">
+              {isLoggedIn ? (
+                <div className="space-y-3">
+                  <div className="px-4 py-2">
+                    <p className="text-sm font-medium text-[#342D2C]">
+                      {session?.user?.name}
                     </p>
-
-                    <button
-                      type="button"
-                      onClick={handleLogout}
-                      disabled={loggingOut}
-                      className="w-full bg-[#984E59] px-4 py-3 text-sm text-white disabled:opacity-60"
-                    >
-                      {loggingOut ? "Signing Out..." : "Logout"}
-                    </button>
+                    <p className="mt-1 break-all text-xs text-[#81736E]">
+                      {session?.user?.email}
+                    </p>
                   </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-3">
-                    <Link
-                      href="/login"
-                      onClick={() => setMenuOpen(false)}
-                      className="border border-[#984E59] px-4 py-3 text-center text-sm text-[#984E59]"
-                    >
-                      Sign In
-                    </Link>
 
-                    <Link
-                      href="/register"
-                      onClick={() => setMenuOpen(false)}
-                      className="bg-[#984E59] px-4 py-3 text-center text-sm text-white"
-                    >
-                      Register
-                    </Link>
-                  </div>
-                )}
-              </div>
-            )}
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    disabled={loggingOut}
+                    className="w-full bg-[#984E59] px-4 py-3 text-sm font-medium text-white disabled:opacity-60"
+                  >
+                    {loggingOut ? "Signing Out..." : "Logout"}
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <Link
+                    href="/login"
+                    onClick={() => setMenuOpen(false)}
+                    className="border border-[#984E59] px-4 py-3 text-center text-sm text-[#984E59]"
+                  >
+                    Sign In
+                  </Link>
+
+                  <Link
+                    href="/register"
+                    onClick={() => setMenuOpen(false)}
+                    className="bg-[#984E59] px-4 py-3 text-center text-sm text-white"
+                  >
+                    Join Us
+                  </Link>
+                </div>
+              )}
+            </div>
           </div>
         </nav>
       )}

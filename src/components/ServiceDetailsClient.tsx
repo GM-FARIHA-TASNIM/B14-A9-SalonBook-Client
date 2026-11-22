@@ -1,14 +1,13 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import {
-  API_URL,
+  apiRequest,
   type ApiService,
   type ApiAppointment,
-  apiRequest,
 } from "@/lib/salon-api";
 
 type Props = {
@@ -19,14 +18,16 @@ const timeSlots = [
   { label: "10:00 AM", value: "10:00" },
   { label: "11:00 AM", value: "11:00" },
   { label: "12:00 PM", value: "12:00" },
+  { label: "01:00 PM", value: "13:00" },
   { label: "02:00 PM", value: "14:00" },
   { label: "03:00 PM", value: "15:00" },
   { label: "04:00 PM", value: "16:00" },
   { label: "05:00 PM", value: "17:00" },
 ];
 
-function getLocalDate(): string {
+function getLocalDate() {
   const today = new Date();
+
   const year = today.getFullYear();
   const month = String(today.getMonth() + 1).padStart(2, "0");
   const day = String(today.getDate()).padStart(2, "0");
@@ -34,71 +35,92 @@ function getLocalDate(): string {
   return `${year}-${month}-${day}`;
 }
 
+const fieldClass =
+  "w-full border border-[#E7DAD3] bg-white px-4 py-3.5 text-sm outline-none focus:border-[#984E59]";
+
 export default function ServiceDetailsClient({ serviceId }: Props) {
   const router = useRouter();
-  const { data: session, isPending } = authClient.useSession();
+
+  const { data: session, isPending: sessionLoading } = authClient.useSession();
 
   const [service, setService] = useState<ApiService | null>(null);
   const [loading, setLoading] = useState(true);
-  const [booking, setBooking] = useState(false);
-  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [phone, setPhone] = useState("");
   const [message, setMessage] = useState("");
 
-  useEffect(() => {
-    const controller = new AbortController();
+  const [error, setError] = useState("");
 
-    async function loadService() {
-      try {
-        const response = await fetch(
-          `${API_URL}/api/services/${encodeURIComponent(serviceId)}`,
-          { signal: controller.signal },
-        );
+  const loadService = useCallback(async () => {
+    setLoading(true);
+    setError("");
 
-        const result = await response.json();
+    try {
+      const data = await apiRequest<ApiService>(
+        `/api/services/${encodeURIComponent(serviceId)}`,
+      );
 
-        if (!response.ok || !result.success) {
-          throw new Error(result.message || "Service not found");
-        }
-
-        setService(result.data);
-      } catch (err) {
-        if (controller.signal.aborted) return;
-
-        setError(err instanceof Error ? err.message : "Unable to load service");
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
-      }
+      setService(data);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Unable to load service details.",
+      );
+    } finally {
+      setLoading(false);
     }
-
-    loadService();
-
-    return () => controller.abort();
   }, [serviceId]);
+
+  useEffect(() => {
+    void loadService();
+  }, [loadService]);
 
   async function handleBooking(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setMessage("");
+    setError("");
 
-    if (!session) {
-      router.push("/login");
+    if (!session?.user) {
+      router.push(
+        `/login?callbackURL=${encodeURIComponent(`/services/${serviceId}`)}`,
+      );
       return;
     }
 
-    if (!service || !date || !time || !phone.trim()) {
-      setMessage("Please complete all required fields.");
+    if (!service) {
+      setError("Service information is unavailable.");
+      return;
+    }
+
+    if (!date || !time || !phone.trim()) {
+      setError("Please complete all required fields.");
       return;
     }
 
     if (date < getLocalDate()) {
-      setMessage("Please select today or a future date.");
+      setError("Please choose today or a future date.");
       return;
     }
 
-    setBooking(true);
+    if (date === getLocalDate()) {
+      const now = new Date();
+      const selectedMinutes =
+        Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+      if (selectedMinutes <= currentMinutes) {
+        setError("Please choose a future time.");
+        return;
+      }
+    }
+
+    if (phone.trim().length < 7 || phone.trim().length > 20) {
+      setError("Please enter a valid phone number.");
+      return;
+    }
+
+    setSubmitting(true);
 
     try {
       await apiRequest<ApiAppointment>("/api/appointments", {
@@ -108,41 +130,58 @@ export default function ServiceDetailsClient({ serviceId }: Props) {
           date,
           time,
           phone: phone.trim(),
+          message: message.trim(),
         }),
       });
 
       router.push("/dashboard?tab=appointments");
       router.refresh();
     } catch (err) {
-      setMessage(
-        err instanceof Error ? err.message : "Unable to book appointment.",
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to book appointment. Please try again.",
       );
     } finally {
-      setBooking(false);
+      setSubmitting(false);
     }
   }
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-[#FFFCF9] px-6 py-24 text-center text-[#81736E]">
-        Loading service details...
+      <main className="flex min-h-[70vh] items-center justify-center bg-[#FFFCF9]">
+        <p className="text-sm text-[#984E59]">Loading service details...</p>
       </main>
     );
   }
 
   if (!service) {
     return (
-      <main className="min-h-screen bg-[#FFFCF9] px-6 py-24 text-center">
+      <main className="min-h-[70vh] bg-[#FFFCF9] px-5 py-24 text-center">
         <h1 className="font-serif text-3xl text-[#342D2C]">
-          Service Not Available
+          Service Unavailable
         </h1>
-        <p className="mt-4 text-[#984E59]">{error}</p>
-        <Link
-          href="/services"
-          className="mt-6 inline-block text-[#984E59] underline"
-        >
-          Back to Services
-        </Link>
+
+        <p className="mt-4 text-sm text-red-600">
+          {error || "Service not found."}
+        </p>
+
+        <div className="mt-7 flex justify-center gap-4">
+          <button
+            type="button"
+            onClick={() => void loadService()}
+            className="bg-[#984E59] px-6 py-3 text-sm text-white"
+          >
+            Try Again
+          </button>
+
+          <Link
+            href="/services"
+            className="border border-[#984E59] px-6 py-3 text-sm text-[#984E59]"
+          >
+            All Services
+          </Link>
+        </div>
       </main>
     );
   }
@@ -196,6 +235,7 @@ export default function ServiceDetailsClient({ serviceId }: Props) {
               <div className="mt-8 grid grid-cols-2 gap-4">
                 <div className="border border-[#EADDD6] bg-white p-5">
                   <p className="text-xs text-[#81736E]">Service Price</p>
+
                   <p className="mt-2 font-serif text-2xl text-[#984E59]">
                     ৳{service.price.toLocaleString("en-BD")}
                   </p>
@@ -203,6 +243,7 @@ export default function ServiceDetailsClient({ serviceId }: Props) {
 
                 <div className="border border-[#EADDD6] bg-white p-5">
                   <p className="text-xs text-[#81736E]">Duration</p>
+
                   <p className="mt-2 font-serif text-2xl text-[#984E59]">
                     {service.duration} min
                   </p>
@@ -214,7 +255,7 @@ export default function ServiceDetailsClient({ serviceId }: Props) {
 
                 <p className="mt-3 text-sm leading-7 text-[#81736E]">
                   Choose your preferred date and time, and reserve your beauty
-                  appointment in just a few simple steps.
+                  appointment in a few simple steps.
                 </p>
               </div>
             </div>
@@ -232,16 +273,27 @@ export default function ServiceDetailsClient({ serviceId }: Props) {
                 Select your preferred date and time to request an appointment.
               </p>
 
-              {!isPending && !session && (
-                <div className="mt-6 border border-[#EADDD6] bg-[#F8F0EB] p-4 text-sm">
+              {error && (
+                <div
+                  role="alert"
+                  className="mt-6 border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+                >
+                  {error}
+                </div>
+              )}
+
+              {!sessionLoading && !session?.user && (
+                <div className="mt-6 border border-[#EADDD6] bg-[#F8F0EB] p-4 text-sm text-[#81736E]">
                   Please{" "}
                   <Link
-                    href="/login"
+                    href={`/login?callbackURL=${encodeURIComponent(
+                      `/services/${serviceId}`,
+                    )}`}
                     className="font-semibold text-[#984E59] underline"
                   >
                     sign in
                   </Link>{" "}
-                  before booking.
+                  to confirm your appointment.
                 </div>
               )}
 
@@ -260,8 +312,8 @@ export default function ServiceDetailsClient({ serviceId }: Props) {
                     required
                     min={getLocalDate()}
                     value={date}
-                    onChange={(e) => setDate(e.target.value)}
-                    className="w-full border border-[#E7DAD3] bg-white px-4 py-3.5 text-sm outline-none focus:border-[#984E59]"
+                    onChange={(event) => setDate(event.target.value)}
+                    className={fieldClass}
                   />
                 </div>
 
@@ -277,8 +329,8 @@ export default function ServiceDetailsClient({ serviceId }: Props) {
                     id="booking-time"
                     required
                     value={time}
-                    onChange={(e) => setTime(e.target.value)}
-                    className="w-full border border-[#E7DAD3] bg-white px-4 py-3.5 text-sm outline-none focus:border-[#984E59]"
+                    onChange={(event) => setTime(event.target.value)}
+                    className={fieldClass}
                   >
                     <option value="">Select a time slot</option>
 
@@ -301,10 +353,10 @@ export default function ServiceDetailsClient({ serviceId }: Props) {
                   <input
                     id="booking-name"
                     type="text"
+                    value={session?.user?.name || ""}
                     readOnly
-                    value={session?.user.name || ""}
-                    placeholder="Sign in to continue"
-                    className="w-full border border-[#E7DAD3] bg-[#FAF7F4] px-4 py-3.5 text-sm outline-none"
+                    placeholder="Your account name"
+                    className={`${fieldClass} bg-[#F8F0EB]`}
                   />
                 </div>
 
@@ -319,10 +371,10 @@ export default function ServiceDetailsClient({ serviceId }: Props) {
                   <input
                     id="booking-email"
                     type="email"
+                    value={session?.user?.email || ""}
                     readOnly
-                    value={session?.user.email || ""}
-                    placeholder="Sign in to continue"
-                    className="w-full border border-[#E7DAD3] bg-[#FAF7F4] px-4 py-3.5 text-sm outline-none"
+                    placeholder="Your account email"
+                    className={`${fieldClass} bg-[#F8F0EB]`}
                   />
                 </div>
 
@@ -338,72 +390,86 @@ export default function ServiceDetailsClient({ serviceId }: Props) {
                     id="booking-phone"
                     type="tel"
                     required
-                    autoComplete="tel"
+                    minLength={7}
+                    maxLength={20}
                     value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="Enter your phone number"
-                    className="w-full border border-[#E7DAD3] bg-white px-4 py-3.5 text-sm outline-none focus:border-[#984E59]"
+                    onChange={(event) => setPhone(event.target.value)}
+                    placeholder="01XXXXXXXXX"
+                    className={fieldClass}
                   />
                 </div>
 
-                <div className="border border-[#EADDD6] bg-[#F8F0EB] p-5">
+                <div>
+                  <label
+                    htmlFor="booking-message"
+                    className="mb-2 block text-sm font-medium"
+                  >
+                    Special Request (Optional)
+                  </label>
+
+                  <textarea
+                    id="booking-message"
+                    rows={4}
+                    maxLength={500}
+                    value={message}
+                    onChange={(event) => setMessage(event.target.value)}
+                    placeholder="Any special requests?"
+                    className={fieldClass}
+                  />
+                </div>
+
+                <div className="border border-[#EADDD6] bg-[#FFFCF9] p-5">
                   <h3 className="font-serif text-xl">Booking Summary</h3>
 
                   <div className="mt-4 space-y-3 text-sm">
-                    <div className="flex justify-between gap-3">
+                    <div className="flex justify-between gap-4">
                       <span className="text-[#81736E]">Service</span>
                       <span className="text-right font-medium">
                         {service.name}
                       </span>
                     </div>
 
-                    <div className="flex justify-between gap-3">
+                    <div className="flex justify-between gap-4">
                       <span className="text-[#81736E]">Duration</span>
                       <span>{service.duration} min</span>
                     </div>
 
-                    <div className="flex justify-between gap-3">
-                      <span className="text-[#81736E]">Date</span>
-                      <span>{date || "Not selected"}</span>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-[#81736E]">Appointment Status</span>
+                      <span>Pending</span>
                     </div>
 
-                    <div className="flex justify-between gap-3">
-                      <span className="text-[#81736E]">Time</span>
-                      <span>
-                        {timeSlots.find((s) => s.value === time)?.label ||
-                          "Not selected"}
-                      </span>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-[#81736E]">Payment Status</span>
+                      <span>Unpaid</span>
                     </div>
 
-                    <div className="flex justify-between gap-3 border-t border-[#E7DAD3] pt-3">
-                      <span className="font-medium">Total Price</span>
-                      <span className="font-semibold text-[#984E59]">
+                    <div className="flex justify-between gap-4 border-t border-[#EADDD6] pt-4 font-semibold">
+                      <span>Total Price</span>
+                      <span className="text-[#984E59]">
                         ৳{service.price.toLocaleString("en-BD")}
                       </span>
                     </div>
                   </div>
                 </div>
 
-                {message && (
-                  <p
-                    role="alert"
-                    className="border border-[#EADDD6] bg-[#F8F0EB] p-4 text-sm text-[#984E59]"
-                  >
-                    {message}
-                  </p>
-                )}
-
                 <button
                   type="submit"
-                  disabled={booking || isPending}
-                  className="w-full bg-[#984E59] px-6 py-4 text-xs font-semibold uppercase tracking-[0.15em] text-white hover:bg-[#803F49] disabled:opacity-60"
+                  disabled={submitting || sessionLoading}
+                  className="w-full bg-[#984E59] px-6 py-4 text-sm font-semibold uppercase tracking-wider text-white disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {booking ? "Booking..." : "Confirm Booking"}
+                  {submitting
+                    ? "Booking Appointment..."
+                    : sessionLoading
+                      ? "Checking Session..."
+                      : session?.user
+                        ? "Confirm Booking"
+                        : "Sign In to Book"}
                 </button>
 
                 <p className="text-center text-xs leading-6 text-[#81736E]">
-                  Your appointment request will be saved securely. Payment is
-                  not collected at this stage.
+                  Your appointment request will be saved to your account.
+                  Payment will be available after Stripe integration.
                 </p>
               </form>
             </div>

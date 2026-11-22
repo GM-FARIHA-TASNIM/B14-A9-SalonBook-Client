@@ -1,18 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-
-import {
-  initialAppointments,
-  type Appointment,
-  type AppointmentStatus,
-} from "@/data/appointments";
-
-import { getAppointments, saveAppointments } from "@/lib/booking-storage";
+import { authClient } from "@/lib/auth-client";
+import { API_URL, type ApiAppointment } from "@/lib/salon-api";
+import PayNowButton from "@/components/PayNowButton";
 
 type Tab = "overview" | "appointments" | "profile";
+type AppointmentStatus = ApiAppointment["status"];
 
 const navigation: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -27,60 +23,107 @@ const statusStyles: Record<AppointmentStatus, string> = {
   cancelled: "bg-red-50 text-red-700",
 };
 
-const currency = (value: number) => `৳${value.toLocaleString("en-BD")}`;
+const currency = (value: number) =>
+  `৳${Number(value || 0).toLocaleString("en-BD")}`;
+
+function formatTime(time: string) {
+  if (!/^\d{2}:\d{2}$/.test(time)) return time;
+
+  const [hours, minutes] = time.split(":").map(Number);
+  const period = hours >= 12 ? "PM" : "AM";
+  const hour = hours % 12 || 12;
+
+  return `${String(hour).padStart(2, "0")}:${String(minutes).padStart(2, "0")} ${period}`;
+}
 
 export default function CustomerDashboard() {
   const searchParams = useSearchParams();
 
+  const { data: session, isPending: sessionLoading } = authClient.useSession();
+
   const [activeTab, setActiveTab] = useState<Tab>("overview");
-
-  const [appointments, setAppointments] =
-    useState<Appointment[]>(initialAppointments);
-
+  const [appointments, setAppointments] = useState<ApiAppointment[]>([]);
+  const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
-  const [name, setName] = useState("Demo Customer");
-  const [email, setEmail] = useState("customer@example.com");
-  const [phone, setPhone] = useState("01700000000");
-  const [profileImage, setProfileImage] = useState("");
+  const user = session?.user;
+  const name = user?.name || "Customer";
+  const email = user?.email || "";
+  const profileImage = user?.image || "";
 
   useEffect(() => {
-    const loadBookings = () => {
-      setAppointments(getAppointments());
-    };
+    const tab = searchParams.get("tab");
 
-    const handleStorageChange = () => {
-      loadBookings();
-    };
+    if (tab === "overview" || tab === "appointments" || tab === "profile") {
+      setActiveTab(tab);
+    }
+  }, [searchParams]);
 
-    loadBookings();
+  const loadAppointments = useCallback(async () => {
+    setLoading(true);
+    setError("");
 
-    window.addEventListener("salonbook-bookings-updated", loadBookings);
+    try {
+      const response = await fetch(`${API_URL}/api/appointments/my`, {
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+      });
 
-    window.addEventListener("storage", handleStorageChange);
+      const result = await response.json();
 
-    return () => {
-      window.removeEventListener("salonbook-bookings-updated", loadBookings);
+      if (!response.ok || result.success === false) {
+        throw new Error(result.message || "Failed to load appointments");
+      }
 
-      window.removeEventListener("storage", handleStorageChange);
-    };
+      const items = Array.isArray(result)
+        ? result
+        : Array.isArray(result.data)
+          ? result.data
+          : Array.isArray(result.appointments)
+            ? result.appointments
+            : null;
+
+      if (!items) {
+        throw new Error("Invalid appointments response");
+      }
+
+      setAppointments(items);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Unable to load appointments",
+      );
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (searchParams.get("tab") === "appointments") {
-      setActiveTab("appointments");
+    if (sessionLoading) return;
+
+    if (!user) {
+      setAppointments([]);
+      setLoading(false);
+      return;
     }
-  }, [searchParams]);
+
+    void loadAppointments();
+  }, [sessionLoading, user?.id, loadAppointments]);
 
   const stats = useMemo(
     () => ({
       total: appointments.length,
+
       pending: appointments.filter(
         (appointment) => appointment.status === "pending",
       ).length,
+
       confirmed: appointments.filter(
         (appointment) => appointment.status === "confirmed",
       ).length,
+
       completed: appointments.filter(
         (appointment) => appointment.status === "completed",
       ).length,
@@ -88,11 +131,17 @@ export default function CustomerDashboard() {
     [appointments],
   );
 
-  const cancelAppointment = (id: string) => {
-    const appointment = appointments.find((item) => item.id === id);
+  async function cancelAppointment(id: string) {
+    const appointment = appointments.find((item) => item._id === id);
 
-    if (!appointment || appointment.status !== "pending") {
-      setNotice("Only pending appointments can be cancelled.");
+    if (
+      !appointment ||
+      !["pending", "confirmed"].includes(appointment.status) ||
+      appointment.paymentStatus !== "unpaid"
+    ) {
+      setNotice(
+        "Only unpaid pending or confirmed appointments can be cancelled.",
+      );
       return;
     }
 
@@ -100,41 +149,63 @@ export default function CustomerDashboard() {
       return;
     }
 
-    const updatedAppointments: Appointment[] = appointments.map((item) =>
-      item.id === id ? { ...item, status: "cancelled" } : item,
-    );
+    setCancellingId(id);
+    setNotice("");
+    setError("");
 
     try {
-      saveAppointments(updatedAppointments);
-      setAppointments(updatedAppointments);
-      setNotice("Demo appointment cancelled successfully.");
-    } catch {
-      setNotice("Unable to save the cancellation.");
+      const response = await fetch(
+        `${API_URL}/api/appointments/${encodeURIComponent(id)}/cancel`,
+        {
+          method: "PATCH",
+          credentials: "include",
+        },
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Unable to cancel appointment");
+      }
+
+      await loadAppointments();
+
+      setNotice("Appointment cancelled successfully.");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Unable to cancel appointment.",
+      );
+    } finally {
+      setCancellingId(null);
     }
-  };
+  }
 
-  const handlePayment = (appointment: Appointment) => {
-    if (
-      appointment.status !== "confirmed" ||
-      appointment.paymentStatus === "paid"
-    ) {
-      return;
-    }
-
-    setNotice(
-      `Payment preview for ${appointment.id}: ${currency(
-        appointment.price,
-      )}. Stripe Checkout will be connected later.`,
+  if (sessionLoading) {
+    return (
+      <main className="min-h-screen bg-[#FFFCF9] px-5 py-24 text-center text-[#81736E]">
+        Loading your dashboard...
+      </main>
     );
-  };
+  }
 
-  const handleProfileSave = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  if (!user) {
+    return (
+      <main className="min-h-screen bg-[#FFFCF9] px-5 py-24 text-center">
+        <h1 className="font-serif text-3xl text-[#342D2C]">Please Sign In</h1>
 
-    setNotice(
-      "Profile preview updated. Changes are not saved to the database yet.",
+        <p className="mt-4 text-[#81736E]">
+          Sign in to manage your appointments.
+        </p>
+
+        <Link
+          href="/login"
+          className="mt-6 inline-block bg-[#984E59] px-8 py-3 text-sm text-white"
+        >
+          Sign In
+        </Link>
+      </main>
     );
-  };
+  }
 
   return (
     <main className="min-h-screen bg-[#FFFCF9] text-[#342D2C]">
@@ -158,7 +229,7 @@ export default function CustomerDashboard() {
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={profileImage}
-                  alt="Profile"
+                  alt={name}
                   className="h-full w-full object-cover"
                 />
               ) : (
@@ -183,7 +254,7 @@ export default function CustomerDashboard() {
                 className={`px-4 py-3 text-left text-sm ${
                   activeTab === item.id
                     ? "bg-[#984E59] text-white"
-                    : "text-[#665B58] hover:bg-[#F8F0EB]"
+                    : "text-[#665B58]"
                 }`}
               >
                 {item.label}
@@ -206,6 +277,23 @@ export default function CustomerDashboard() {
               className="mb-6 border border-[#EADDD6] bg-[#F8F0EB] p-4 text-sm text-[#984E59]"
             >
               {notice}
+            </div>
+          )}
+
+          {error && (
+            <div
+              role="alert"
+              className="mb-6 border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+            >
+              {error}
+
+              <button
+                type="button"
+                onClick={() => void loadAppointments()}
+                className="ml-4 font-semibold underline"
+              >
+                Retry
+              </button>
             </div>
           )}
 
@@ -251,7 +339,7 @@ export default function CustomerDashboard() {
                     <p className="text-xs text-[#81736E]">{stat.label}</p>
 
                     <p className="mt-4 font-serif text-4xl text-[#984E59]">
-                      {stat.value}
+                      {loading ? "..." : stat.value}
                     </p>
                   </div>
                 ))}
@@ -270,7 +358,15 @@ export default function CustomerDashboard() {
                   </button>
                 </div>
 
-                {appointments.length === 0 ? (
+                {loading ? (
+                  <p className="mt-6 text-sm text-[#81736E]">
+                    Loading appointments...
+                  </p>
+                ) : error ? (
+                  <p className="mt-6 text-sm text-[#81736E]">
+                    Unable to display appointments.
+                  </p>
+                ) : appointments.length === 0 ? (
                   <div className="mt-6 py-10 text-center">
                     <p className="text-sm text-[#81736E]">
                       You have no appointments yet.
@@ -287,7 +383,7 @@ export default function CustomerDashboard() {
                   <div className="mt-6 space-y-4">
                     {appointments.slice(0, 3).map((appointment) => (
                       <div
-                        key={appointment.id}
+                        key={appointment._id}
                         className="flex flex-wrap items-center justify-between gap-4 border-b border-[#F0E6E0] pb-4"
                       >
                         <div>
@@ -296,13 +392,13 @@ export default function CustomerDashboard() {
                           </p>
 
                           <p className="mt-1 text-xs text-[#81736E]">
-                            {appointment.date} · {appointment.time}
+                            {appointment.date} · {formatTime(appointment.time)}
                           </p>
                         </div>
 
                         <span
                           className={`px-3 py-1.5 text-xs capitalize ${
-                            statusStyles[appointment.status]
+                            statusStyles[appointment.status] || ""
                           }`}
                         >
                           {appointment.status}
@@ -317,13 +413,34 @@ export default function CustomerDashboard() {
 
           {activeTab === "appointments" && (
             <section>
-              <h2 className="mb-3 font-serif text-3xl">My Appointments</h2>
+              <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h2 className="mb-3 font-serif text-3xl">My Appointments</h2>
 
-              <p className="mb-8 text-sm text-[#81736E]">
-                View your booking history and appointment status.
-              </p>
+                  <p className="text-sm text-[#81736E]">
+                    View your booking history and appointment status.
+                  </p>
+                </div>
 
-              {appointments.length === 0 ? (
+                <button
+                  type="button"
+                  onClick={() => void loadAppointments()}
+                  disabled={loading}
+                  className="border border-[#984E59] px-5 py-2.5 text-xs font-semibold text-[#984E59] disabled:opacity-60"
+                >
+                  Refresh
+                </button>
+              </div>
+
+              {loading ? (
+                <p className="py-10 text-center text-[#81736E]">
+                  Loading your appointments...
+                </p>
+              ) : error ? (
+                <p className="py-10 text-center text-[#81736E]">
+                  Appointments could not be loaded.
+                </p>
+              ) : appointments.length === 0 ? (
                 <div className="border border-[#EADDD6] bg-white px-6 py-14 text-center">
                   <h3 className="font-serif text-2xl">No Appointments Yet</h3>
 
@@ -335,20 +452,20 @@ export default function CustomerDashboard() {
                     href="/services"
                     className="mt-6 inline-block bg-[#984E59] px-6 py-3 text-sm text-white"
                   >
-                    Book a Service
+                    Explore Services
                   </Link>
                 </div>
               ) : (
                 <div className="space-y-5">
                   {appointments.map((appointment) => (
                     <article
-                      key={appointment.id}
+                      key={appointment._id}
                       className="border border-[#EADDD6] bg-white p-5 md:p-7"
                     >
                       <div className="flex flex-wrap items-start justify-between gap-4">
                         <div>
-                          <p className="mb-2 text-xs text-[#A75F66]">
-                            {appointment.id}
+                          <p className="mb-2 break-all text-xs text-[#A75F66]">
+                            Booking #{appointment._id.slice(-8).toUpperCase()}
                           </p>
 
                           <h3 className="font-serif text-2xl">
@@ -358,7 +475,7 @@ export default function CustomerDashboard() {
 
                         <span
                           className={`px-3 py-1.5 text-xs capitalize ${
-                            statusStyles[appointment.status]
+                            statusStyles[appointment.status] || ""
                           }`}
                         >
                           {appointment.status}
@@ -374,7 +491,7 @@ export default function CustomerDashboard() {
                           <p>
                             {appointment.date}
                             <br />
-                            {appointment.time}
+                            {formatTime(appointment.time)}
                           </p>
                         </div>
 
@@ -390,31 +507,33 @@ export default function CustomerDashboard() {
                           <p className="mb-1 text-xs text-[#81736E]">Payment</p>
 
                           <p className="capitalize">
-                            {appointment.paymentStatus}
+                            {appointment.paymentStatus || "unpaid"}
                           </p>
                         </div>
                       </div>
 
                       <div className="mt-5 flex flex-wrap gap-3">
-                        {appointment.status === "pending" && (
-                          <button
-                            type="button"
-                            onClick={() => cancelAppointment(appointment.id)}
-                            className="border border-[#984E59] px-5 py-2.5 text-xs font-semibold text-[#984E59]"
-                          >
-                            Cancel Appointment
-                          </button>
-                        )}
-
-                        {appointment.status === "confirmed" &&
+                        {["pending", "confirmed"].includes(
+                          appointment.status,
+                        ) &&
                           appointment.paymentStatus === "unpaid" && (
                             <button
                               type="button"
-                              onClick={() => handlePayment(appointment)}
-                              className="bg-[#984E59] px-5 py-2.5 text-xs font-semibold text-white"
+                              onClick={() =>
+                                void cancelAppointment(appointment._id)
+                              }
+                              disabled={cancellingId === appointment._id}
+                              className="border border-[#984E59] px-5 py-2.5 text-xs font-semibold text-[#984E59] disabled:opacity-60"
                             >
-                              Pay Now
+                              {cancellingId === appointment._id
+                                ? "Cancelling..."
+                                : "Cancel Appointment"}
                             </button>
+                          )}
+
+                        {appointment.status === "confirmed" &&
+                          appointment.paymentStatus === "unpaid" && (
+                            <PayNowButton appointmentId={appointment._id} />
                           )}
                       </div>
                     </article>
@@ -429,20 +548,17 @@ export default function CustomerDashboard() {
               <h2 className="mb-3 font-serif text-3xl">My Profile</h2>
 
               <p className="mb-8 text-sm text-[#81736E]">
-                Manage your personal information.
+                View and manage your personal information.
               </p>
 
-              <form
-                onSubmit={handleProfileSave}
-                className="max-w-2xl space-y-6 border border-[#EADDD6] bg-white p-6 md:p-8"
-              >
-                <div className="flex items-center gap-5">
+              <div className="max-w-2xl border border-[#EADDD6] bg-white p-6 md:p-8">
+                <div className="mb-6 flex items-center gap-5 border-b border-[#EADDD6] pb-6">
                   <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#F3E1DD] font-serif text-3xl text-[#984E59]">
                     {profileImage ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={profileImage}
-                        alt="Profile preview"
+                        alt={name}
                         className="h-full w-full object-cover"
                       />
                     ) : (
@@ -451,84 +567,21 @@ export default function CustomerDashboard() {
                   </div>
 
                   <div>
-                    <label
-                      htmlFor="profile-image"
-                      className="mb-2 block text-sm font-medium"
-                    >
-                      Profile Image URL
-                    </label>
+                    <h3 className="font-serif text-2xl">{name}</h3>
 
-                    <input
-                      id="profile-image"
-                      type="url"
-                      value={profileImage}
-                      onChange={(event) => setProfileImage(event.target.value)}
-                      placeholder="https://example.com/photo.jpg"
-                      className="w-full max-w-sm border border-[#E7DAD3] px-3 py-2 text-sm outline-none focus:border-[#984E59]"
-                    />
+                    <p className="mt-2 break-all text-sm text-[#81736E]">
+                      {email}
+                    </p>
                   </div>
                 </div>
 
-                <div>
-                  <label
-                    htmlFor="profile-name"
-                    className="mb-2 block text-sm font-medium"
-                  >
-                    Full Name
-                  </label>
-
-                  <input
-                    id="profile-name"
-                    type="text"
-                    required
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    className="w-full border border-[#E7DAD3] px-4 py-3 outline-none focus:border-[#984E59]"
-                  />
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="profile-email"
-                    className="mb-2 block text-sm font-medium"
-                  >
-                    Email Address
-                  </label>
-
-                  <input
-                    id="profile-email"
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    className="w-full border border-[#E7DAD3] px-4 py-3 outline-none focus:border-[#984E59]"
-                  />
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="profile-phone"
-                    className="mb-2 block text-sm font-medium"
-                  >
-                    Phone Number
-                  </label>
-
-                  <input
-                    id="profile-phone"
-                    type="tel"
-                    value={phone}
-                    onChange={(event) => setPhone(event.target.value)}
-                    className="w-full border border-[#E7DAD3] px-4 py-3 outline-none focus:border-[#984E59]"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  className="bg-[#984E59] px-7 py-3.5 text-xs font-semibold uppercase tracking-wider text-white"
+                <Link
+                  href="/profile"
+                  className="inline-block bg-[#984E59] px-7 py-3.5 text-xs font-semibold uppercase tracking-wider text-white"
                 >
-                  Save Changes
-                </button>
-              </form>
+                  Edit My Profile
+                </Link>
+              </div>
             </section>
           )}
         </div>

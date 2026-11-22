@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -13,6 +15,50 @@ export default function ProfilePage() {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [checkingRole, setCheckingRole] = useState(true);
+
+  useEffect(() => {
+    if (isPending) return;
+
+    if (!session?.user) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function checkAdminRole() {
+      setCheckingRole(true);
+      setIsAdmin(false);
+
+      try {
+        const response = await fetch(`${API_URL}/api/appointments`, {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        });
+
+        if (!cancelled) {
+          setIsAdmin(response.ok);
+        }
+      } catch {
+        if (!cancelled) {
+          setIsAdmin(false);
+        }
+      } finally {
+        if (!cancelled) {
+          setCheckingRole(false);
+        }
+      }
+    }
+
+    void checkAdminRole();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user?.id, isPending]);
 
   async function handleUpdate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -109,6 +155,16 @@ export default function ProfilePage() {
             <h2 className="mt-5 font-serif text-3xl">{user.name}</h2>
 
             <p className="mt-2 text-sm text-[#81736E]">{user.email}</p>
+
+            {checkingRole ? (
+              <p className="mt-3 text-xs text-[#81736E]">
+                Checking account access...
+              </p>
+            ) : (
+              <span className="mt-4 bg-[#F8F0EB] px-4 py-2 text-xs font-semibold uppercase tracking-wider text-[#984E59]">
+                {isAdmin ? "Administrator" : "Customer"}
+              </span>
+            )}
           </div>
 
           <div className="space-y-6">
@@ -185,12 +241,32 @@ export default function ProfilePage() {
             )}
 
             <div className="border-t border-[#EADDD6] pt-6">
-              <Link
-                href="/dashboard"
-                className="inline-block text-sm font-semibold text-[#984E59]"
-              >
-                View My Dashboard →
-              </Link>
+              <h3 className="mb-5 font-serif text-2xl">Quick Access</h3>
+
+              <div className="flex flex-wrap gap-4">
+                <Link
+                  href="/dashboard"
+                  className="inline-flex items-center justify-center bg-[#984E59] px-6 py-3 text-sm font-semibold text-white"
+                >
+                  My Dashboard
+                </Link>
+
+                {isAdmin && (
+                  <Link
+                    href="/admin"
+                    className="inline-flex items-center justify-center border border-[#984E59] px-6 py-3 text-sm font-semibold text-[#984E59]"
+                  >
+                    Admin Dashboard
+                  </Link>
+                )}
+
+                <Link
+                  href="/services"
+                  className="inline-flex items-center justify-center border border-[#E7DAD3] px-6 py-3 text-sm font-semibold text-[#665B58]"
+                >
+                  Explore Services
+                </Link>
+              </div>
             </div>
           </div>
         </div>

@@ -29,10 +29,21 @@ export type ApiAppointment = {
   paymentStatus: "unpaid" | "paid";
 };
 
+export type ApiUser = {
+  _id: string;
+  name: string;
+  email: string;
+  image: string | null;
+  role: "admin" | "customer";
+  emailVerified: boolean;
+  createdAt: string | null;
+};
+
 type ApiResponse<T> = {
   success: boolean;
   data?: T;
   message?: string;
+  errors?: unknown;
 };
 
 export async function apiRequest<T>(
@@ -42,6 +53,7 @@ export async function apiRequest<T>(
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
     credentials: "include",
+    cache: "no-store",
     headers: {
       "Content-Type": "application/json",
       ...options.headers,
@@ -59,4 +71,25 @@ export async function apiRequest<T>(
   }
 
   return result.data;
+}
+
+export async function apiAction(
+  path: string,
+  options: RequestInit,
+): Promise<void> {
+  const response = await fetch(`${API_URL}${path}`, {
+    ...options,
+    credentials: "include",
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+
+  const result = (await response.json()) as ApiResponse<unknown>;
+
+  if (!response.ok || !result.success) {
+    throw new Error(result.message || `Request failed (${response.status})`);
+  }
 }
